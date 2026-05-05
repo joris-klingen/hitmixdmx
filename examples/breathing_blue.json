@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "rig": "hitmix",
+  "clips": [
+    {
+      "name": "breathing blue",
+      "slot": 2,
+      "length_beats": 16,
+      "color_index": 4,
+      "events": [
+        {"type": "breathe", "fixture": "left_bar",     "t_start": 0, "t_end": 16, "color": [0, 0.4, 1.0], "v_min": 0.05, "v_max": 1.0, "cycles": 4, "samples_per_cycle": 12},
+        {"type": "breathe", "fixture": "right_bar",    "t_start": 0, "t_end": 16, "color": [0, 0.4, 1.0], "v_min": 0.05, "v_max": 1.0, "cycles": 4, "samples_per_cycle": 12},
+        {"type": "color_hold", "fixture": "singer_left",  "t_start": 0, "t_end": 16, "color": [0.0, 0.0, 0.6]},
+        {"type": "color_hold", "fixture": "singer_right", "t_start": 0, "t_end": 16, "color": [0.0, 0.0, 0.6]},
+        {"type": "breathe", "fixture": "*", "component": "dimmer", "t_start": 0, "t_end": 16, "v_min": 0.2, "v_max": 1.0, "cycles": 4, "samples_per_cycle": 12}
+      ]
+    }
+  ]
+}

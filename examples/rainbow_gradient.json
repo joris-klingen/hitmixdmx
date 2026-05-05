@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "rig": "hitmix",
+  "clips": [
+    {
+      "name": "rainbow gradient",
+      "slot": 1,
+      "length_beats": 8,
+      "color_index": 9,
+      "events": [
+        {"type": "gradient_hold", "fixture": "left_bar",  "t_start": 0, "t_end": 8, "hue_start": 0.0,  "hue_end": 1.0, "saturation": 1.0, "value": 0.6},
+        {"type": "gradient_hold", "fixture": "right_bar", "t_start": 0, "t_end": 8, "hue_start": 0.5,  "hue_end": 1.5, "saturation": 1.0, "value": 0.6},
+        {"type": "color_hold",    "fixture": "singer_left",  "t_start": 0, "t_end": 8, "color": [1.0, 0.7, 0.2]},
+        {"type": "color_hold",    "fixture": "singer_right", "t_start": 0, "t_end": 8, "color": [0.2, 0.7, 1.0]},
+        {"type": "value_hold",    "fixture": "*", "component": "dimmer", "t_start": 0, "t_end": 8, "value": 1.0}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "rig": "hitmix",
+  "clips": [
+    {
+      "name": "four-on-floor red",
+      "slot": 0,
+      "length_beats": 4,
+      "color_index": 1,
+      "events": [
+        {"type": "color_stab", "fixture": "*", "pixel": "*", "time": 0, "duration": 0.25, "color": [1, 0, 0]},
+        {"type": "color_stab", "fixture": "*", "pixel": "*", "time": 1, "duration": 0.25, "color": [1, 0, 0]},
+        {"type": "color_stab", "fixture": "*", "pixel": "*", "time": 2, "duration": 0.25, "color": [1, 0, 0]},
+        {"type": "color_stab", "fixture": "*", "pixel": "*", "time": 3, "duration": 0.25, "color": [1, 0, 0]},
+        {"type": "value_hold", "fixture": "*", "component": "dimmer", "t_start": 0, "t_end": 4, "value": 1.0}
+      ]
+    },
+    {
+      "name": "rainbow",
+      "slot": 1,
+      "length_beats": 8,
+      "color_index": 9,
+      "events": [
+        {"type": "gradient_hold", "fixture": "left_bar",  "t_start": 0, "t_end": 8, "hue_start": 0.0, "hue_end": 1.0},
+        {"type": "gradient_hold", "fixture": "right_bar", "t_start": 0, "t_end": 8, "hue_start": 0.5, "hue_end": 1.5},
+        {"type": "color_hold",    "fixture": "singer_left",  "t_start": 0, "t_end": 8, "color": [1.0, 0.7, 0.2]},
+        {"type": "color_hold",    "fixture": "singer_right", "t_start": 0, "t_end": 8, "color": [0.2, 0.7, 1.0]},
+        {"type": "value_hold",    "fixture": "*", "component": "dimmer", "t_start": 0, "t_end": 8, "value": 1.0}
+      ]
+    },
+    {
+      "name": "breathing blue",
+      "slot": 2,
+      "length_beats": 16,
+      "color_index": 4,
+      "events": [
+        {"type": "breathe", "fixture": "left_bar",  "t_start": 0, "t_end": 16, "color": [0, 0.4, 1.0], "v_min": 0.05, "v_max": 1.0, "cycles": 4, "samples_per_cycle": 12},
+        {"type": "breathe", "fixture": "right_bar", "t_start": 0, "t_end": 16, "color": [0, 0.4, 1.0], "v_min": 0.05, "v_max": 1.0, "cycles": 4, "samples_per_cycle": 12},
+        {"type": "color_hold", "fixture": "singer_left",  "t_start": 0, "t_end": 16, "color": [0.0, 0.0, 0.6]},
+        {"type": "color_hold", "fixture": "singer_right", "t_start": 0, "t_end": 16, "color": [0.0, 0.0, 0.6]},
+        {"type": "breathe", "fixture": "*", "component": "dimmer", "t_start": 0, "t_end": 16, "v_min": 0.2, "v_max": 1.0, "cycles": 4, "samples_per_cycle": 12}
+      ]
+    }
+  ]
+}
