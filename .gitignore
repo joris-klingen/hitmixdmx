@@ -1,5 +1,9 @@
 # macOS
 .DS_Store
+Icon?
+
+# Ableton Live auto-saves (regenerated on every save)
+Backup/
 
 # Python
 __pycache__/
