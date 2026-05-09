@@ -169,6 +169,35 @@ def test_chase_stabs_per_pixel(tmp_path):
     assert blue_at_ids.issubset(pointee_ids)
 
 
+def test_clean_clears_unspecified_slots(tmp_path):
+    template = load_template(TEMPLATE)
+    pre_populated = sum(
+        1 for s in template.clip_slots if s.find("ClipSlot/Value/MidiClip") is not None
+    )
+    assert pre_populated > 1, "template needs multiple existing clips for this test"
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "only one",
+            "slot": 0,
+            "length_beats": 4,
+            "events": [
+                {"type": "color_hold", "fixture": "*", "t_start": 0, "t_end": 4, "color": [1, 0, 0]},
+            ],
+        }],
+    })
+    render(spec, template, clean=True)
+    out = tmp_path / "clean.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    populated = [
+        i for i, s in enumerate(reloaded.clip_slots)
+        if s.find("ClipSlot/Value/MidiClip") is not None
+    ]
+    assert populated == [0]
+
+
 def test_invalid_slot_raises(tmp_path):
     template = load_template(TEMPLATE)
     spec = Spec.model_validate(

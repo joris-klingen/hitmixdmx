@@ -29,6 +29,11 @@ def main(argv: list[str] | None = None) -> int:
     p_render.add_argument("spec", type=Path, help="path to the JSON spec")
     p_render.add_argument("template", type=Path, help="path to the template .als")
     p_render.add_argument("out", type=Path, help="path to write the output .als")
+    p_render.add_argument(
+        "--clean",
+        action="store_true",
+        help="clear any clip slots not referenced by the spec",
+    )
 
     p_inspect = sub.add_parser("inspect", help="introspect an .als template")
     p_inspect.add_argument("template", type=Path)
@@ -56,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "render":
-        return _cmd_render(args.spec, args.template, args.out)
+        return _cmd_render(args.spec, args.template, args.out, args.clean)
     if args.cmd == "inspect":
         return _cmd_inspect(args.template)
     if args.cmd == "prompt":
@@ -67,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
-def _cmd_render(spec_path: Path, template_path: Path, out_path: Path) -> int:
+def _cmd_render(spec_path: Path, template_path: Path, out_path: Path, clean: bool) -> int:
     raw = json.loads(spec_path.read_text())
     spec = Spec.model_validate(raw)
     template = load_template(template_path)
@@ -77,8 +82,9 @@ def _cmd_render(spec_path: Path, template_path: Path, out_path: Path) -> int:
         f"Loaded template: {template.plugin.channel_count} channels, "
         f"{template.scene_count} scenes, {len(template.clip_slots)} slots"
     )
-    print(f"Rendering {n_clips} clip(s) from {spec_path.name}")
-    render(spec, template)
+    suffix = " (clearing unused slots)" if clean else ""
+    print(f"Rendering {n_clips} clip(s) from {spec_path.name}{suffix}")
+    render(spec, template, clean=clean)
     save(template, out_path)
     print(f"Wrote {out_path}")
     return 0

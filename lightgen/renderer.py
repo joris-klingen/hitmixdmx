@@ -20,13 +20,14 @@ from .events import ChannelEvent
 from .spec import Clip, Spec
 
 
-def render(spec: Spec, template: TemplateInfo) -> None:
+def render(spec: Spec, template: TemplateInfo, clean: bool = False) -> None:
     rig = spec.resolve_rig()
     if rig.total_channels > template.plugin.channel_count:
         raise ValueError(
             f"rig requires {rig.total_channels} channels but template only "
             f"exposes {template.plugin.channel_count}. Configure more channels in DMXIS."
         )
+    used_slots: set[int] = set()
     for clip_spec in spec.clips:
         if clip_spec.slot >= len(template.clip_slots):
             raise ValueError(
@@ -37,6 +38,16 @@ def render(spec: Spec, template: TemplateInfo) -> None:
         by_channel = _group_normalize(events, clip_spec.length_beats)
         clip_xml = _build_clip(template, clip_spec, by_channel)
         _replace_slot_clip(template.clip_slots[clip_spec.slot], clip_xml)
+        used_slots.add(clip_spec.slot)
+    if clean:
+        for i, slot in enumerate(template.clip_slots):
+            if i in used_slots:
+                continue
+            value = slot.find("ClipSlot/Value")
+            if value is None:
+                continue
+            for child in list(value):
+                value.remove(child)
 
 
 def _expand_clip(clip: Clip, rig) -> list[ChannelEvent]:
