@@ -23,9 +23,6 @@ Open the resulting `.als` in Ableton Live; the generated clip will be in the slo
 For fast iteration without hand-editing JSON:
 
 ```bash
-# Set your API key once per shell session (get one at https://console.anthropic.com/)
-export ANTHROPIC_API_KEY=sk-ant-...
-
 # Generate a fresh spec from a description
 uv run lightgen prompt "4-bar red four-on-floor with a white flash on beat 4" my_spec.json
 
@@ -41,12 +38,14 @@ uv run lightgen render my_spec.json \
   out/my.als
 ```
 
-Use `--out new.json` on `tweak` to keep the original spec when you want to compare. Use `--model claude-opus-4-7` on either if a request needs more creative reasoning.
+Authentication uses the local `claude` CLI (Claude Code), so this taps your Claude Max subscription — no separate API key needed. Make sure you've run `claude` at least once and signed in.
+
+Use `--out new.json` on `tweak` to keep the original spec when you want to compare. Use `--model opus` (or `--model sonnet`) if a request needs a different model.
 
 ## Setup
 
 ```bash
-uv sync       # installs Python 3.13, pydantic, anthropic, pytest
+uv sync       # installs Python 3.13, pydantic, pytest
 uv run pytest # runs the test suite
 ```
 

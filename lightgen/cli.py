@@ -98,12 +98,11 @@ def _cmd_inspect(template_path: Path) -> int:
 
 
 def _cmd_prompt(text: str, out_path: Path, model: str | None) -> int:
-    from .llm import DEFAULT_MODEL, generate_spec
+    from .llm import generate_spec
 
-    chosen = model or DEFAULT_MODEL
-    print(f"Asking {chosen} for a spec…", file=sys.stderr)
+    print(f"Asking Claude{f' ({model})' if model else ''} for a spec…", file=sys.stderr)
     try:
-        spec = generate_spec(text, model=chosen)
+        spec = generate_spec(text, model=model)
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -113,18 +112,17 @@ def _cmd_prompt(text: str, out_path: Path, model: str | None) -> int:
 
 
 def _cmd_tweak(spec_path: Path, text: str, out_path: Path | None, model: str | None) -> int:
-    from .llm import DEFAULT_MODEL, generate_spec
+    from .llm import generate_spec
 
     raw = json.loads(spec_path.read_text())
     base = Spec.model_validate(raw)
     target = out_path or spec_path
-    chosen = model or DEFAULT_MODEL
     print(
-        f"Asking {chosen} to tweak {spec_path.name} → {target.name}…",
+        f"Asking Claude{f' ({model})' if model else ''} to tweak {spec_path.name} → {target.name}…",
         file=sys.stderr,
     )
     try:
-        spec = generate_spec(text, base_spec=base, model=chosen)
+        spec = generate_spec(text, base_spec=base, model=model)
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

@@ -1,8 +1,9 @@
-"""Tests for the Claude-backed spec generator. No network — uses a fake client."""
+"""Tests for the Claude-Code-backed spec generator. No subprocess — uses a fake runner."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
@@ -12,36 +13,32 @@ from lightgen.spec import Spec
 
 
 @dataclass
-class _FakeBlock:
-    type: str
-    name: str | None = None
-    input: dict[str, Any] | None = None
+class _FakeCompleted:
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int = 0
 
 
 @dataclass
-class _FakeResponse:
-    content: list[_FakeBlock]
-    stop_reason: str = "tool_use"
+class _FakeRunner:
+    completed: _FakeCompleted
+    last_cmd: list[str] | None = field(default=None)
+    last_kwargs: dict[str, Any] | None = field(default=None)
 
-
-class _FakeMessages:
-    def __init__(self, response: _FakeResponse) -> None:
-        self._response = response
-        self.last_kwargs: dict[str, Any] | None = None
-
-    def create(self, **kwargs: Any) -> _FakeResponse:
+    def __call__(self, cmd: list[str], **kwargs: Any) -> _FakeCompleted:
+        self.last_cmd = cmd
         self.last_kwargs = kwargs
-        return self._response
+        return self.completed
 
 
-class _FakeClient:
-    def __init__(self, response: _FakeResponse) -> None:
-        self.messages = _FakeMessages(response)
-
-
-def _make_response(spec_dict: dict[str, Any]) -> _FakeResponse:
-    return _FakeResponse(
-        content=[_FakeBlock(type="tool_use", name="submit_spec", input=spec_dict)]
+def _envelope(result_text: str, *, is_error: bool = False) -> str:
+    return json.dumps(
+        {
+            "type": "result",
+            "subtype": "success" if not is_error else "error",
+            "is_error": is_error,
+            "result": result_text,
+        }
     )
 
 
@@ -84,39 +81,74 @@ def test_build_system_prompt_mentions_rig_fixtures() -> None:
 
 
 def test_generate_spec_from_scratch() -> None:
-    client = _FakeClient(_make_response(SIMPLE_SPEC))
-    spec = generate_spec("4 bars of red kicks", client=client)
+    runner = _FakeRunner(_FakeCompleted(stdout=_envelope(json.dumps(SIMPLE_SPEC))))
+    spec = generate_spec("4 bars of red kicks", runner=runner)
 
     assert isinstance(spec, Spec)
     assert spec.clips[0].name == "test red kicks"
-    assert len(spec.clips[0].events) == 2
 
-    kwargs = client.messages.last_kwargs
-    assert kwargs is not None
-    assert kwargs["tool_choice"] == {"type": "tool", "name": "submit_spec"}
-    assert kwargs["tools"][0]["name"] == "submit_spec"
-    assert kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
-    user_blocks = kwargs["messages"][0]["content"]
-    assert len(user_blocks) == 1
-    assert user_blocks[0]["text"] == "4 bars of red kicks"
+    cmd = runner.last_cmd
+    assert cmd is not None
+    assert cmd[0] == "claude"
+    assert "-p" in cmd and "--system-prompt" in cmd
+    assert "--output-format" in cmd and "json" in cmd
+    assert "--tools" in cmd
+    assert cmd[cmd.index("--tools") + 1] == ""
+    p_idx = cmd.index("-p")
+    assert cmd[p_idx + 1] == "4 bars of red kicks"
 
 
 def test_generate_spec_with_base_includes_existing_spec() -> None:
     base = Spec.model_validate(SIMPLE_SPEC)
-    client = _FakeClient(_make_response(SIMPLE_SPEC))
-    generate_spec("make beat 3 white", base_spec=base, client=client)
+    runner = _FakeRunner(_FakeCompleted(stdout=_envelope(json.dumps(SIMPLE_SPEC))))
+    generate_spec("make beat 3 white", base_spec=base, runner=runner)
 
-    user_blocks = client.messages.last_kwargs["messages"][0]["content"]
-    assert len(user_blocks) == 2
-    assert "existing spec" in user_blocks[0]["text"]
-    assert "test red kicks" in user_blocks[0]["text"]
-    assert user_blocks[1]["text"] == "make beat 3 white"
+    cmd = runner.last_cmd
+    user_text = cmd[cmd.index("-p") + 1]
+    assert "Existing spec to modify" in user_text
+    assert "test red kicks" in user_text
+    assert "make beat 3 white" in user_text
 
 
-def test_generate_spec_raises_when_tool_not_called() -> None:
-    response = _FakeResponse(
-        content=[_FakeBlock(type="text")], stop_reason="end_turn"
+def test_generate_spec_handles_fenced_json() -> None:
+    fenced = "```json\n" + json.dumps(SIMPLE_SPEC) + "\n```"
+    runner = _FakeRunner(_FakeCompleted(stdout=_envelope(fenced)))
+    spec = generate_spec("anything", runner=runner)
+    assert spec.clips[0].name == "test red kicks"
+
+
+def test_generate_spec_tolerates_preamble_around_json() -> None:
+    text = "Sure, here's the spec:\n" + json.dumps(SIMPLE_SPEC) + "\n\nLet me know!"
+    runner = _FakeRunner(_FakeCompleted(stdout=_envelope(text)))
+    spec = generate_spec("anything", runner=runner)
+    assert spec.clips[0].name == "test red kicks"
+
+
+def test_generate_spec_passes_model_when_provided() -> None:
+    runner = _FakeRunner(_FakeCompleted(stdout=_envelope(json.dumps(SIMPLE_SPEC))))
+    generate_spec("hi", model="opus", runner=runner)
+    cmd = runner.last_cmd
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "opus"
+
+
+def test_generate_spec_raises_on_nonzero_exit() -> None:
+    runner = _FakeRunner(
+        _FakeCompleted(stdout="", stderr="auth failed", returncode=1)
     )
-    client = _FakeClient(response)
-    with pytest.raises(RuntimeError, match="did not call submit_spec"):
-        generate_spec("hi", client=client)
+    with pytest.raises(RuntimeError, match="claude exited 1.*auth failed"):
+        generate_spec("hi", runner=runner)
+
+
+def test_generate_spec_raises_on_error_envelope() -> None:
+    runner = _FakeRunner(
+        _FakeCompleted(stdout=_envelope("rate limit", is_error=True))
+    )
+    with pytest.raises(RuntimeError, match="claude returned error"):
+        generate_spec("hi", runner=runner)
+
+
+def test_generate_spec_raises_on_unparseable_text() -> None:
+    runner = _FakeRunner(_FakeCompleted(stdout=_envelope("just words, no JSON here")))
+    with pytest.raises(RuntimeError, match="could not parse JSON"):
+        generate_spec("hi", runner=runner)

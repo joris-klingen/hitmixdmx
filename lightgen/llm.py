@@ -1,25 +1,21 @@
-"""Claude-powered spec generation and editing.
+"""Claude-powered spec generation via the Claude Code CLI.
 
-Two entry points:
-  - generate_spec(prompt)               for from-scratch
-  - generate_spec(prompt, base=spec)    for tweaks of an existing spec
-
-Both use Anthropic tool-use with the Spec JSON schema as the tool's input
-schema, forcing Claude to return a structurally-valid spec that we then
-validate through pydantic. The system prompt is large and identical between
-calls, so we mark it `cache_control=ephemeral` to hit the prompt cache.
+Shells out to `claude -p` so authentication uses the user's Claude Max
+subscription (no separate Anthropic API key needed). The system prompt is
+fully overridden via `--system-prompt`, which suppresses Claude Code's
+default auto-memory and dynamic sections. Tools are disabled via
+`--tools ""` so the model behaves as a pure chat completion.
 """
 
 from __future__ import annotations
 
-import os
-from typing import Any
+import json
+import re
+import subprocess
+from typing import Any, Callable
 
 from .fixtures import HITMIX_RIG, RGBStrip, RGBWSpot, Rig
 from .spec import Spec
-
-
-DEFAULT_MODEL = "claude-sonnet-4-6"
 
 
 SYSTEM_TEMPLATE = """You are a lighting designer writing DMX clips for an Ableton Live + DMXIS rig. You produce JSON specs that the lightgen renderer turns into clips.
@@ -30,7 +26,7 @@ SYSTEM_TEMPLATE = """You are a lighting designer writing DMX clips for an Ableto
 
 # Spec format
 
-```json
+```
 {{
   "version": 1,
   "rig": "hitmix",
@@ -80,7 +76,7 @@ All times are in beats from clip start. All values and color components are floa
 # Examples
 
 Four-on-floor red kick stabs, dimmer locked on, 4-beat loop:
-```json
+```
 {{
   "version": 1, "rig": "hitmix",
   "clips": [{{
@@ -97,7 +93,7 @@ Four-on-floor red kick stabs, dimmer locked on, 4-beat loop:
 ```
 
 Slow breathing blue, 16 beats, with deeper-blue spots:
-```json
+```
 {{
   "version": 1, "rig": "hitmix",
   "clips": [{{
@@ -113,11 +109,13 @@ Slow breathing blue, 16 beats, with deeper-blue spots:
 }}
 ```
 
-# Your task
+# Modifying an existing spec
 
-Call the `submit_spec` tool with the complete spec. Return ONLY through the tool — do not write the JSON in your text reply.
+When the user message includes an existing spec to modify, return the COMPLETE updated spec. Keep everything they did NOT ask to change (slot, length_beats, color_index, untouched events) exactly as it was. Modify only what they asked for.
 
-When given an existing spec to modify: keep everything the user did NOT ask to change, modify only what they asked for, preserve the slot/length/color_index unless explicitly asked otherwise.
+# Output
+
+Respond with ONLY the JSON spec object. No markdown code fences, no commentary, no preamble — just the bare JSON starting with `{{` and ending with `}}`. Your entire response will be parsed as JSON.
 """
 
 
@@ -143,83 +141,106 @@ def build_system_prompt(rig: Rig = HITMIX_RIG) -> str:
     return SYSTEM_TEMPLATE.format(rig_summary=_rig_summary(rig))
 
 
-def _spec_input_schema() -> dict[str, Any]:
-    """JSON Schema for the Spec tool input. Pydantic produces JSON Schema with
-    $defs/$ref and discriminated unions; Anthropic accepts these."""
-    return Spec.model_json_schema()
+def _build_user_prompt(user_prompt: str, base_spec: Spec | None) -> str:
+    if base_spec is None:
+        return user_prompt
+    return (
+        "Existing spec to modify (return the complete updated spec):\n\n"
+        + base_spec.model_dump_json(indent=2)
+        + "\n\nRequested change:\n"
+        + user_prompt
+    )
 
 
-def _build_messages(user_prompt: str, base_spec: Spec | None) -> list[dict[str, Any]]:
-    content: list[dict[str, Any]] = []
-    if base_spec is not None:
-        content.append(
-            {
-                "type": "text",
-                "text": (
-                    "Here is the existing spec. Apply the requested change and return the "
-                    "complete updated spec:\n\n```json\n"
-                    + base_spec.model_dump_json(indent=2)
-                    + "\n```"
-                ),
-            }
-        )
-    content.append({"type": "text", "text": user_prompt})
-    return [{"role": "user", "content": content}]
+_FENCE_RE = re.compile(r"^```(?:json)?\s*\n(.*)\n```\s*$", re.DOTALL)
+
+
+def _extract_json(text: str) -> dict[str, Any]:
+    """Parse JSON from text, tolerant of code-fence wrapping or stray prose."""
+    s = text.strip()
+    m = _FENCE_RE.match(s)
+    if m:
+        s = m.group(1).strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    start = s.find("{")
+    end = s.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError(f"no JSON object found in response: {text[:300]!r}")
+    return json.loads(s[start : end + 1])
+
+
+Runner = Callable[..., subprocess.CompletedProcess]
 
 
 def generate_spec(
     user_prompt: str,
     *,
     base_spec: Spec | None = None,
-    model: str = DEFAULT_MODEL,
-    client: Any = None,
-    max_tokens: int = 8192,
+    model: str | None = None,
+    runner: Runner | None = None,
+    timeout: float = 180.0,
 ) -> Spec:
-    """Ask Claude to produce or modify a Spec. Returns a validated Spec.
+    """Use Claude Code (`claude -p`) to generate or modify a Spec.
 
-    Raises RuntimeError on API or schema failures, ValidationError if Claude
-    returns a spec that doesn't match the pydantic model.
+    Auth uses the user's Claude Max subscription via the local `claude` CLI.
     """
-    if client is None:
-        try:
-            import anthropic
-        except ImportError as e:
-            raise RuntimeError("anthropic package not installed; run `uv sync`") from e
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise RuntimeError(
-                "ANTHROPIC_API_KEY is not set. Get a key at https://console.anthropic.com/ "
-                "and export it: `export ANTHROPIC_API_KEY=sk-ant-...`"
-            )
-        client = anthropic.Anthropic()
-
     rig = HITMIX_RIG if base_spec is None else base_spec.resolve_rig()
     system_text = build_system_prompt(rig)
+    user_text = _build_user_prompt(user_prompt, base_spec)
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=[
-            {
-                "type": "text",
-                "text": system_text,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        tools=[
-            {
-                "name": "submit_spec",
-                "description": "Submit the complete lighting spec.",
-                "input_schema": _spec_input_schema(),
-            }
-        ],
-        tool_choice={"type": "tool", "name": "submit_spec"},
-        messages=_build_messages(user_prompt, base_spec),
-    )
+    cmd = [
+        "claude",
+        "-p",
+        user_text,
+        "--system-prompt",
+        system_text,
+        "--output-format",
+        "json",
+        "--tools",
+        "",
+        "--no-session-persistence",
+    ]
+    if model:
+        cmd += ["--model", model]
 
-    for block in response.content:
-        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "submit_spec":
-            return Spec.model_validate(block.input)
-    raise RuntimeError(
-        "Claude did not call submit_spec. stop_reason="
-        f"{getattr(response, 'stop_reason', '?')!r}"
-    )
+    run = runner if runner is not None else subprocess.run
+    try:
+        result = run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "`claude` CLI not found. Install Claude Code from https://claude.com/code "
+            "and ensure it's on your PATH."
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"claude timed out after {timeout}s") from e
+
+    if result.returncode != 0:
+        msg = (result.stderr or result.stdout or "").strip() or "(no output)"
+        raise RuntimeError(f"claude exited {result.returncode}: {msg}")
+
+    try:
+        envelope = json.loads(result.stdout)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"claude stdout was not JSON: {result.stdout[:500]!r}"
+        ) from e
+
+    if envelope.get("is_error"):
+        raise RuntimeError(
+            f"claude returned error: {envelope.get('result') or envelope}"
+        )
+    text = (envelope.get("result") or "").strip()
+    if not text:
+        raise RuntimeError(f"claude returned empty result. envelope={envelope}")
+
+    try:
+        spec_dict = _extract_json(text)
+    except (ValueError, json.JSONDecodeError) as e:
+        raise RuntimeError(
+            f"could not parse JSON from claude response: {e}\n\nresponse text:\n{text[:1000]}"
+        ) from e
+
+    return Spec.model_validate(spec_dict)
