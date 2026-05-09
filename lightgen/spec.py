@@ -62,9 +62,7 @@ FixtureSelector = Union[str, Literal["*"]]
 
 
 def _resolve_fixtures(rig: Rig, sel: FixtureSelector) -> list[Fixture]:
-    if sel == "*":
-        return list(rig)
-    return [rig[sel]]
+    return rig.resolve(sel)
 
 
 def _strip_pixel_channels(strip: RGBStrip, pixel: PixelSelector) -> list[tuple[int, int, int]]:
@@ -249,8 +247,129 @@ class Breathe(_Base):
         return out
 
 
+class Pulse(BaseModel):
+    """One pulse within a PulsePattern: a stab at `offset` lasting `duration`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    offset: float = 0.0
+    duration: float = Field(gt=0)
+
+
+class PulsePattern(_Base):
+    """Repeating stab pattern over time.
+
+    Emits a stab at every `t_start + k * period + pulse.offset` for k = 0, 1, ...
+    while still within `[t_start, t_end)`. Collapses what would otherwise be a
+    long list of color_stab/value_stab events into one declarative event.
+
+    When `component == "rgb"` (the default), each pulse is a `color_stab` using
+    `color`. Otherwise it is a `value_stab` on the named spot channel using
+    `value`.
+    """
+
+    type: Literal["pulse_pattern"]
+    fixture: FixtureSelector
+    pixel: PixelSelector = "*"
+    component: SpotComponent | Literal["rgb"] = "rgb"
+    t_start: float
+    t_end: float
+    period: float = Field(gt=0)
+    pulses: list[Pulse] = Field(min_length=1)
+    color: Color | None = None
+    value: float = 1.0
+
+    def expand(self, rig: Rig) -> list[ChannelEvent]:
+        if self.component == "rgb" and self.color is None:
+            raise ValueError("pulse_pattern with component='rgb' requires `color`")
+        if self.t_end <= self.t_start:
+            raise ValueError(
+                f"pulse_pattern: t_end ({self.t_end}) must be > t_start ({self.t_start})"
+            )
+        out: list[ChannelEvent] = []
+        for f in _resolve_fixtures(rig, self.fixture):
+            if self.component == "rgb":
+                if isinstance(f, RGBStrip):
+                    rgb_triples = _strip_pixel_channels(f, self.pixel)
+                elif isinstance(f, RGBWSpot):
+                    rgb_triples = [f.rgb()]
+                else:
+                    continue
+                for rgb in rgb_triples:
+                    out += self._emit_rgb(rgb)
+            else:
+                if not isinstance(f, RGBWSpot):
+                    continue
+                ch = _spot_channel(f, self.component)
+                out += self._emit_value([ch])
+        return out
+
+    def _pulse_times(self) -> list[tuple[float, float]]:
+        """List of (t_pulse_start, duration) tuples within [t_start, t_end)."""
+        out: list[tuple[float, float]] = []
+        k = 0
+        while True:
+            base = self.t_start + k * self.period
+            if base >= self.t_end:
+                break
+            for p in self.pulses:
+                t_pulse = base + p.offset
+                if t_pulse < self.t_start or t_pulse >= self.t_end:
+                    continue
+                end = min(t_pulse + p.duration, self.t_end)
+                if end <= t_pulse:
+                    continue
+                out.append((t_pulse, end - t_pulse))
+            k += 1
+        return out
+
+    def _emit_rgb(self, rgb: tuple[int, int, int]) -> list[ChannelEvent]:
+        assert self.color is not None
+        out: list[ChannelEvent] = []
+        for t, dur in self._pulse_times():
+            out += color_stab(rgb, t, dur, self.color)
+        return out
+
+    def _emit_value(self, channels: list[int]) -> list[ChannelEvent]:
+        out: list[ChannelEvent] = []
+        for t, dur in self._pulse_times():
+            out += stab(channels, t, dur, self.value)
+        return out
+
+
+class Chase(_Base):
+    """Sweep of color_stabs across a strip's pixels, staggered in time.
+
+    Pixel `p` (1-based) gets a stab at `t_start + (p - 1) * step` with the given
+    `duration`. With `reverse=True`, the sweep goes from highest pixel to
+    lowest.
+    """
+
+    type: Literal["chase"]
+    fixture: str
+    t_start: float
+    step: float = Field(gt=0)
+    duration: float = Field(gt=0)
+    color: Color
+    reverse: bool = False
+
+    def expand(self, rig: Rig) -> list[ChannelEvent]:
+        f = rig[self.fixture]
+        if not isinstance(f, RGBStrip):
+            raise ValueError(
+                f"chase target {self.fixture!r} must be an RGB strip "
+                f"(got {type(f).__name__})"
+            )
+        order = range(f.pixels, 0, -1) if self.reverse else range(1, f.pixels + 1)
+        out: list[ChannelEvent] = []
+        for i, p in enumerate(order):
+            t = self.t_start + i * self.step
+            out += color_stab(f.channels_for(p), t, self.duration, self.color)
+        return out
+
+
 Event = Annotated[
-    Union[ColorStab, ColorHold, GradientHold, ValueStab, ValueHold, Breathe],
+    Union[ColorStab, ColorHold, GradientHold, ValueStab, ValueHold, Breathe, PulsePattern, Chase],
     Field(discriminator="type"),
 ]
 

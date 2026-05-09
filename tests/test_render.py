@@ -70,6 +70,105 @@ def test_example_renders_cleanly(tmp_path, spec_name):
         assert loop_end == clip_spec.length_beats
 
 
+def test_fixture_groups_resolve():
+    bars = HITMIX_RIG.resolve("bars")
+    assert [b.name for b in bars] == ["left_bar", "right_bar"]
+    spots = HITMIX_RIG.resolve("spots")
+    assert [s.name for s in spots] == ["singer_left", "singer_right"]
+    assert {f.name for f in HITMIX_RIG.resolve("*")} == {
+        "left_bar", "right_bar", "singer_left", "singer_right"
+    }
+    with pytest.raises(KeyError):
+        HITMIX_RIG.resolve("nope")
+
+
+def test_pulse_pattern_rgb_repeats_on_bars(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "p",
+            "slot": 0,
+            "length_beats": 8,
+            "events": [
+                {"type": "pulse_pattern", "fixture": "bars", "t_start": 0, "t_end": 8,
+                 "period": 1, "pulses": [{"offset": 0, "duration": 0.25}],
+                 "color": [1, 0, 0]},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "p.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    # left_bar pixel-1 R = channel 1; expect 8 stab pulses → on/off pairs at 0..0.25, 1..1.25, ...
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    envs = clip.findall("Envelopes/Envelopes/ClipEnvelope")
+    # spots should be untouched (group=bars excludes them); only bar channels appear.
+    pointee_ids = {int(e.find("EnvelopeTarget/PointeeId").get("Value")) for e in envs}
+    bar_at_ids = {reloaded.plugin.at_id(c) for c in range(1, 109)}  # bars: ch 1..108
+    spot_at_ids = {reloaded.plugin.at_id(c) for c in range(109, 121)}
+    assert pointee_ids.issubset(bar_at_ids)
+    assert pointee_ids.isdisjoint(spot_at_ids)
+
+
+def test_pulse_pattern_value_on_spot_dimmer(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "d",
+            "slot": 0,
+            "length_beats": 8,
+            "events": [
+                {"type": "pulse_pattern", "fixture": "spots", "component": "dimmer",
+                 "t_start": 0, "t_end": 8, "period": 2,
+                 "pulses": [{"offset": 0, "duration": 1.0}], "value": 1.0},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "d.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    envs = clip.findall("Envelopes/Envelopes/ClipEnvelope")
+    pointee_ids = {int(e.find("EnvelopeTarget/PointeeId").get("Value")) for e in envs}
+    # only spot dimmer channels (109, 115)
+    assert pointee_ids == {reloaded.plugin.at_id(109), reloaded.plugin.at_id(115)}
+
+
+def test_chase_stabs_per_pixel(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "c",
+            "slot": 0,
+            "length_beats": 16,
+            "events": [
+                {"type": "chase", "fixture": "left_bar", "t_start": 0, "step": 0.5,
+                 "duration": 0.4, "color": [0, 0, 1]},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "c.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    envs = clip.findall("Envelopes/Envelopes/ClipEnvelope")
+    # 18 pixels × 3 channels each, but only B>0; expect 18 envelopes (B channels only,
+    # since R and G stay at 0 across the whole clip and get deduped into a flat envelope).
+    # Actually flat envelopes do still get emitted. Just sanity check we touched all 18 pixels' B.
+    pointee_ids = {int(e.find("EnvelopeTarget/PointeeId").get("Value")) for e in envs}
+    blue_at_ids = {reloaded.plugin.at_id(p * 3) for p in range(1, 19)}  # B channels: 3, 6, 9, ..., 54
+    assert blue_at_ids.issubset(pointee_ids)
+
+
 def test_invalid_slot_raises(tmp_path):
     template = load_template(TEMPLATE)
     spec = Spec.model_validate(

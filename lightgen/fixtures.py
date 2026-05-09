@@ -100,13 +100,27 @@ Fixture = RGBStrip | RGBWSpot
 @dataclass(frozen=True)
 class Rig:
     fixtures: dict[str, Fixture] = field(default_factory=dict)
+    groups: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     @classmethod
-    def from_list(cls, fixtures: list[Fixture]) -> "Rig":
+    def from_list(
+        cls,
+        fixtures: list[Fixture],
+        groups: dict[str, list[str]] | None = None,
+    ) -> "Rig":
         names = [f.name for f in fixtures]
         if len(set(names)) != len(names):
             raise ValueError(f"fixture names must be unique: {names}")
-        return cls(fixtures={f.name: f for f in fixtures})
+        fixture_map = {f.name: f for f in fixtures}
+        group_map: dict[str, tuple[str, ...]] = {}
+        for gname, members in (groups or {}).items():
+            if gname in fixture_map:
+                raise ValueError(f"group name {gname!r} collides with a fixture name")
+            for m in members:
+                if m not in fixture_map:
+                    raise ValueError(f"group {gname!r} references unknown fixture {m!r}")
+            group_map[gname] = tuple(members)
+        return cls(fixtures=fixture_map, groups=group_map)
 
     def __getitem__(self, name: str) -> Fixture:
         if name not in self.fixtures:
@@ -117,6 +131,19 @@ class Rig:
 
     def __iter__(self):
         return iter(self.fixtures.values())
+
+    def resolve(self, sel: str) -> list[Fixture]:
+        """Resolve "*", a group name, or a fixture name to a list of Fixtures."""
+        if sel == "*":
+            return list(self.fixtures.values())
+        if sel in self.groups:
+            return [self.fixtures[n] for n in self.groups[sel]]
+        if sel in self.fixtures:
+            return [self.fixtures[sel]]
+        raise KeyError(
+            f"unknown fixture or group {sel!r} "
+            f"(fixtures: {list(self.fixtures)}, groups: {list(self.groups)})"
+        )
 
     @property
     def total_channels(self) -> int:
@@ -131,6 +158,10 @@ HITMIX_RIG = Rig.from_list(
         RGBStrip(name="right_bar", dmx_start=55, pixels=18, orientation="bottom_up"),
         RGBWSpot(name="singer_left", dmx_start=109),
         RGBWSpot(name="singer_right", dmx_start=115),
-    ]
+    ],
+    groups={
+        "bars": ["left_bar", "right_bar"],
+        "spots": ["singer_left", "singer_right"],
+    },
 )
 """The default rig for the Hitmix setup. 120 DMX channels total."""
