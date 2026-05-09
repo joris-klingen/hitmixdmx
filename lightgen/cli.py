@@ -1,8 +1,10 @@
 """Command-line interface for lightgen.
 
-Usage:
+Commands:
     lightgen render <spec.json> <template.als> <out.als>
     lightgen inspect <template.als>
+    lightgen prompt "<text>" <out_spec.json>
+    lightgen tweak <spec.json> "<text>" [--out <new.json>]
 """
 
 from __future__ import annotations
@@ -31,12 +33,36 @@ def main(argv: list[str] | None = None) -> int:
     p_inspect = sub.add_parser("inspect", help="introspect an .als template")
     p_inspect.add_argument("template", type=Path)
 
+    p_prompt = sub.add_parser(
+        "prompt", help="generate a spec from a natural-language prompt via Claude"
+    )
+    p_prompt.add_argument("text", help="what you want, in plain English")
+    p_prompt.add_argument("out", type=Path, help="path to write the spec JSON")
+    p_prompt.add_argument("--model", default=None, help="override the Claude model id")
+
+    p_tweak = sub.add_parser(
+        "tweak", help="modify an existing spec via Claude (in-place by default)"
+    )
+    p_tweak.add_argument("spec", type=Path, help="path to the existing spec JSON")
+    p_tweak.add_argument("text", help="the change you want, in plain English")
+    p_tweak.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="write to this path instead of overwriting the input",
+    )
+    p_tweak.add_argument("--model", default=None, help="override the Claude model id")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "render":
         return _cmd_render(args.spec, args.template, args.out)
     if args.cmd == "inspect":
         return _cmd_inspect(args.template)
+    if args.cmd == "prompt":
+        return _cmd_prompt(args.text, args.out, args.model)
+    if args.cmd == "tweak":
+        return _cmd_tweak(args.spec, args.text, args.out, args.model)
     parser.error(f"unknown command {args.cmd}")
     return 2
 
@@ -68,6 +94,42 @@ def _cmd_inspect(template_path: Path) -> int:
     print(f"  scenes:              {template.scene_count}")
     print(f"  clip slots:          {len(template.clip_slots)}")
     print(f"  next_pointee_id:     {template.next_pointee_id}")
+    return 0
+
+
+def _cmd_prompt(text: str, out_path: Path, model: str | None) -> int:
+    from .llm import DEFAULT_MODEL, generate_spec
+
+    chosen = model or DEFAULT_MODEL
+    print(f"Asking {chosen} for a spec…", file=sys.stderr)
+    try:
+        spec = generate_spec(text, model=chosen)
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    out_path.write_text(spec.model_dump_json(indent=2) + "\n")
+    print(f"Wrote {out_path} ({len(spec.clips)} clip(s))")
+    return 0
+
+
+def _cmd_tweak(spec_path: Path, text: str, out_path: Path | None, model: str | None) -> int:
+    from .llm import DEFAULT_MODEL, generate_spec
+
+    raw = json.loads(spec_path.read_text())
+    base = Spec.model_validate(raw)
+    target = out_path or spec_path
+    chosen = model or DEFAULT_MODEL
+    print(
+        f"Asking {chosen} to tweak {spec_path.name} → {target.name}…",
+        file=sys.stderr,
+    )
+    try:
+        spec = generate_spec(text, base_spec=base, model=chosen)
+    except RuntimeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    target.write_text(spec.model_dump_json(indent=2) + "\n")
+    print(f"Wrote {target} ({len(spec.clips)} clip(s))")
     return 0
 
 

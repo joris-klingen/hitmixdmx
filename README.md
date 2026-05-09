@@ -18,10 +18,35 @@ uv run lightgen render examples/four_on_floor_red.json \
 
 Open the resulting `.als` in Ableton Live; the generated clip will be in the slot you specified, named as in the spec, ready to launch.
 
+### Generate or tweak a spec with Claude
+
+For fast iteration without hand-editing JSON:
+
+```bash
+# Set your API key once per shell session (get one at https://console.anthropic.com/)
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Generate a fresh spec from a description
+uv run lightgen prompt "4-bar red four-on-floor with a white flash on beat 4" my_spec.json
+
+# Render it
+uv run lightgen render my_spec.json \
+  "documentation/example_sets/claude_lights_start Project/claude_lights_start.als" \
+  out/my.als
+
+# Listen, then tweak (overwrites my_spec.json in place)
+uv run lightgen tweak my_spec.json "make beat 3 blue instead of red"
+uv run lightgen render my_spec.json \
+  "documentation/example_sets/claude_lights_start Project/claude_lights_start.als" \
+  out/my.als
+```
+
+Use `--out new.json` on `tweak` to keep the original spec when you want to compare. Use `--model claude-opus-4-7` on either if a request needs more creative reasoning.
+
 ## Setup
 
 ```bash
-uv sync       # installs Python 3.13, pydantic, pytest
+uv sync       # installs Python 3.13, pydantic, anthropic, pytest
 uv run pytest # runs the test suite
 ```
 
@@ -105,6 +130,6 @@ The pipeline is intentionally three-stage: invalid input is caught at parse, inv
 ## Limits in this phase
 
 - Only the `hitmix` rig is supported. Custom rigs come in a later phase.
-- No high-level patterns yet (chase, comet, sweep, strobe). Build them by stacking the primitives or wait for Phase 1.
-- No DMX preview, no LLM integration. See the [build plan](documentation/lighting-app-plan.md) for the roadmap.
+- No high-level patterns yet (chase, comet, sweep, strobe). Build them by stacking the primitives or describe them to `lightgen prompt`.
+- No DMX preview, no UI yet. See the [build plan](documentation/lighting-app-plan.md) for the roadmap.
 - The renderer uses the *first* MidiClip it finds in the template's DMXIS track as the clone source. If your template has no clips, add one in Live first.
