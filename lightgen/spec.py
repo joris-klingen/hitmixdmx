@@ -343,6 +343,11 @@ class Chase(_Base):
     Pixel `p` (1-based) gets a stab at `t_start + (p - 1) * step` with the given
     `duration`. With `reverse=True`, the sweep goes from highest pixel to
     lowest.
+
+    To repeat the sweep on a regular cadence, set `period` and `t_end`: the
+    sweep then starts at `t_start + k * period` for k = 0, 1, ... while still
+    less than `t_end`. Both must be set together (or neither, for a single
+    sweep).
     """
 
     type: Literal["chase"]
@@ -352,6 +357,8 @@ class Chase(_Base):
     duration: float = Field(gt=0)
     color: Color
     reverse: bool = False
+    period: float | None = Field(default=None, gt=0)
+    t_end: float | None = None
 
     def expand(self, rig: Rig) -> list[ChannelEvent]:
         f = rig[self.fixture]
@@ -360,11 +367,31 @@ class Chase(_Base):
                 f"chase target {self.fixture!r} must be an RGB strip "
                 f"(got {type(f).__name__})"
             )
+        if (self.period is None) != (self.t_end is None):
+            raise ValueError(
+                "chase: period and t_end must both be set or both be omitted"
+            )
+        if self.t_end is not None and self.t_end <= self.t_start:
+            raise ValueError(
+                f"chase: t_end ({self.t_end}) must be > t_start ({self.t_start})"
+            )
+        if self.period is None:
+            starts = [self.t_start]
+        else:
+            starts = []
+            k = 0
+            while True:
+                s = self.t_start + k * self.period
+                if s >= self.t_end:
+                    break
+                starts.append(s)
+                k += 1
         order = range(f.pixels, 0, -1) if self.reverse else range(1, f.pixels + 1)
         out: list[ChannelEvent] = []
-        for i, p in enumerate(order):
-            t = self.t_start + i * self.step
-            out += color_stab(f.channels_for(p), t, self.duration, self.color)
+        for s in starts:
+            for i, p in enumerate(order):
+                t = s + i * self.step
+                out += color_stab(f.channels_for(p), t, self.duration, self.color)
         return out
 
 

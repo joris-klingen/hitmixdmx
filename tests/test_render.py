@@ -169,6 +169,64 @@ def test_chase_stabs_per_pixel(tmp_path):
     assert blue_at_ids.issubset(pointee_ids)
 
 
+def test_chase_with_period_repeats(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "r",
+            "slot": 0,
+            "length_beats": 16,
+            "events": [
+                {"type": "chase", "fixture": "left_bar", "t_start": 0, "step": 0.05,
+                 "duration": 0.25, "color": [1, 0, 0], "period": 2, "t_end": 16},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "r.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    # 8 sweeps × 18 pixels each = 144 stab pulses → many ON transitions on each pixel's R channel.
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    r_at_id = reloaded.plugin.at_id(1)  # R of left_bar pixel 1
+    env = next(
+        e for e in clip.findall("Envelopes/Envelopes/ClipEnvelope")
+        if int(e.find("EnvelopeTarget/PointeeId").get("Value")) == r_at_id
+    )
+    floats = env.findall("Automation/Events/FloatEvent")
+    rising_edges = 0
+    prev_v = 0.0
+    for f in floats:
+        t = float(f.get("Time"))
+        v = float(f.get("Value"))
+        if t < 0:
+            continue
+        if v > 0.5 and prev_v <= 0.5:
+            rising_edges += 1
+        prev_v = v
+    assert rising_edges == 8, f"expected 8 rising edges (one per sweep), got {rising_edges}"
+
+
+def test_chase_period_without_t_end_raises():
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "bad",
+            "slot": 0,
+            "length_beats": 4,
+            "events": [
+                {"type": "chase", "fixture": "left_bar", "t_start": 0, "step": 0.1,
+                 "duration": 0.25, "color": [1, 0, 0], "period": 1},
+            ],
+        }],
+    })
+    with pytest.raises(ValueError, match="period and t_end"):
+        render(spec, template)
+
+
 def test_clean_clears_unspecified_slots(tmp_path):
     template = load_template(TEMPLATE)
     pre_populated = sum(
