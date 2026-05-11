@@ -8,6 +8,11 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.optional-dependencies]
+ui = [
+    "gradio>=4.44",
+]
+
 [project.scripts]
 lightgen = "lightgen.cli:main"
 

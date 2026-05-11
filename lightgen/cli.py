@@ -5,6 +5,7 @@ Commands:
     lightgen inspect <template.als>
     lightgen prompt "<text>" <out_spec.json>
     lightgen tweak <spec.json> "<text>" [--out <new.json>]
+    lightgen ui
 """
 
 from __future__ import annotations
@@ -58,6 +59,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_tweak.add_argument("--model", default=None, help="override the Claude model id")
 
+    sub.add_parser(
+        "ui",
+        help="launch the Gradio web UI (requires `uv sync --extra ui`)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.cmd == "render":
@@ -68,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_prompt(args.text, args.out, args.model)
     if args.cmd == "tweak":
         return _cmd_tweak(args.spec, args.text, args.out, args.model)
+    if args.cmd == "ui":
+        return _cmd_ui()
     parser.error(f"unknown command {args.cmd}")
     return 2
 
@@ -135,6 +143,12 @@ def _cmd_tweak(spec_path: Path, text: str, out_path: Path | None, model: str | N
     target.write_text(spec.model_dump_json(indent=2) + "\n")
     print(f"Wrote {target} ({len(spec.clips)} clip(s))")
     return 0
+
+
+def _cmd_ui() -> int:
+    from .ui import main as ui_main
+
+    return ui_main()
 
 
 if __name__ == "__main__":  # pragma: no cover
