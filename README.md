@@ -51,6 +51,8 @@ uv sync --extra ui     # one-time, pulls in gradio
 uv run lightgen ui     # launches at http://127.0.0.1:7860
 ```
 
+Or just **double-click `start-ui.command`** in Finder (drag it to the dock for a persistent shortcut).
+
 You'll get a single page with a textarea (prompt), a tweak box, a JSON preview of the generated spec, and a **Render & Open in Live** button. State is in-memory per session; the current spec and render are also written to `out/ui_current.json` and `out/ui_current.als` so you can grab them from disk.
 
 ## Setup
