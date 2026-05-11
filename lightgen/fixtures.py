@@ -165,3 +165,7 @@ HITMIX_RIG = Rig.from_list(
     },
 )
 """The default rig for the Hitmix setup. 120 DMX channels total."""
+
+
+RIGS: dict[str, Rig] = {"hitmix": HITMIX_RIG}
+"""Registry of known rigs, keyed by the name used in a spec's `rig` field."""

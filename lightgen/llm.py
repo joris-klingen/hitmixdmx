@@ -60,6 +60,20 @@ All times are in beats from clip start. All values and color components are floa
   Fields: `fixture`, `component`, `t_start`, `t_end`, `value`
 - `breathe`  sinusoidal modulation of an RGB color or single channel.
   Fields: `fixture`, `component?` ("rgb" or component name, default "rgb"), `pixel?`, `t_start`, `t_end`, `v_min?` (0), `v_max?` (1), `cycles?` (1), `color?` ([r,g,b], used when component="rgb")
+- `fade`  linear crossfade between two states (Live interpolates between endpoints).
+  Fields: `fixture`, `component?` ("rgb" default or component name), `pixel?`, `t_start`, `t_end`.  When component="rgb": `color_start`, `color_end`.  Otherwise: `value_start`, `value_end`.
+- `ramp`  non-linear value ramp on a single spot component.  Use for energy builds (`ease_in`) and tails (`ease_out`).
+  Fields: `fixture`, `component`, `t_start`, `t_end`, `v_start?` (0), `v_end?` (1), `curve?` ("linear"|"ease_in"|"ease_out", default "linear")
+- `pulse_pattern`  repeating stab pattern.  Emits a stab at every `t_start + k * period + pulse.offset`.
+  Fields: `fixture`, `pixel?`, `component?` ("rgb" default), `t_start`, `t_end`, `period`, `pulses` (list of `{{offset, duration}}`), `color?`/`value?`
+- `strobe`  beat-aligned fast on/off.  `rate_per_beat: 16` = sixteenth-note strobe.
+  Fields: `fixture`, `pixel?`, `component?` ("rgb" default), `t_start`, `t_end`, `rate_per_beat`, `duty?` (0.5), `color?`/`value?`
+- `chase`  sweep of stabs across a strip's pixels.  Pixel `p` lights at `t_start + (p-1) * step`.  Set `period` AND `t_end` to repeat.
+  Fields: `fixture` (strip only), `t_start`, `step`, `duration`, `color`, `reverse?` (false), `period?`, `t_end?`
+- `comet`  sweep with a fading tail per pixel (color → black over `tail_beats`).  Set `period` AND `t_end` to repeat.
+  Fields: `fixture` (strip only), `t_start`, `step`, `tail_beats`, `color`, `reverse?` (false), `period?`, `t_end?`
+- `sparkle`  seeded random stabs across a strip's pixels.  Low density = twinkle, high density = confetti.
+  Fields: `fixture` (strip only), `t_start`, `t_end`, `density` (stabs per beat), `duration`, `color`, `seed?` (0)
 
 # Selectors
 

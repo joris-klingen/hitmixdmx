@@ -15,7 +15,7 @@ from lightgen.spec import Spec
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = (
     REPO_ROOT
-    / "documentation/example_sets/claude_lights_start Project/claude_lights_start.als"
+    / "template/claude_lights_start Project/claude_lights_start.als"
 )
 EXAMPLES = REPO_ROOT / "examples"
 
@@ -68,6 +68,11 @@ def test_example_renders_cleanly(tmp_path, spec_name):
         assert clip.find("Name").get("Value") == clip_spec.name
         loop_end = float(clip.find("Loop/LoopEnd").get("Value"))
         assert loop_end == clip_spec.length_beats
+
+
+def test_unknown_rig_rejected_at_parse():
+    with pytest.raises(ValueError, match="unknown rig"):
+        Spec.model_validate({"version": 1, "rig": "not_a_rig", "clips": []})
 
 
 def test_fixture_groups_resolve():
@@ -227,12 +232,210 @@ def test_chase_period_without_t_end_raises():
         render(spec, template)
 
 
+def test_fade_color_emits_linear_interp(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "f",
+            "slot": 0,
+            "length_beats": 4,
+            "events": [
+                {"type": "fade", "fixture": "left_bar", "pixel": 1,
+                 "t_start": 0, "t_end": 4,
+                 "color_start": [1, 0, 0], "color_end": [0, 0, 1]},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "fade.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    r_id = reloaded.plugin.at_id(1)  # pixel 1 R = ch 1
+    b_id = reloaded.plugin.at_id(3)  # pixel 1 B = ch 3
+    envs = {int(e.find("EnvelopeTarget/PointeeId").get("Value")): e
+            for e in clip.findall("Envelopes/Envelopes/ClipEnvelope")}
+    r_floats = envs[r_id].findall("Automation/Events/FloatEvent")
+    b_floats = envs[b_id].findall("Automation/Events/FloatEvent")
+    # R should ramp from 1 down to 0; B should ramp from 0 up to 1.
+    r_in_range = [(float(f.get("Time")), float(f.get("Value"))) for f in r_floats if float(f.get("Time")) >= 0]
+    b_in_range = [(float(f.get("Time")), float(f.get("Value"))) for f in b_floats if float(f.get("Time")) >= 0]
+    assert r_in_range[0] == (0.0, 1.0) and r_in_range[-1] == (4.0, 0.0)
+    assert b_in_range[0] == (0.0, 0.0) and b_in_range[-1] == (4.0, 1.0)
+
+
+def test_fade_value_requires_value_endpoints():
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "bad",
+            "slot": 0,
+            "length_beats": 4,
+            "events": [
+                {"type": "fade", "fixture": "singer_left", "component": "dimmer",
+                 "t_start": 0, "t_end": 4},
+            ],
+        }],
+    })
+    template = load_template(TEMPLATE)
+    with pytest.raises(ValueError, match="value_start"):
+        render(spec, template)
+
+
+def test_strobe_emits_one_pulse_per_period(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "s",
+            "slot": 0,
+            "length_beats": 4,
+            "events": [
+                {"type": "strobe", "fixture": "left_bar", "pixel": 1,
+                 "t_start": 0, "t_end": 4,
+                 "rate_per_beat": 4, "duty": 0.5, "color": [1, 1, 1]},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "strobe.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    r_id = reloaded.plugin.at_id(1)
+    env = next(e for e in clip.findall("Envelopes/Envelopes/ClipEnvelope")
+               if int(e.find("EnvelopeTarget/PointeeId").get("Value")) == r_id)
+    # 4 beats × 4 strobes/beat = 16 rising edges on the R channel.
+    rising = 0
+    prev = 0.0
+    for f in env.findall("Automation/Events/FloatEvent"):
+        t = float(f.get("Time"))
+        v = float(f.get("Value"))
+        if t < 0:
+            continue
+        if v > 0.5 and prev <= 0.5:
+            rising += 1
+        prev = v
+    assert rising == 16, f"expected 16 strobe pulses, got {rising}"
+
+
+def test_comet_pixel_fades_to_black(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "co",
+            "slot": 0,
+            "length_beats": 8,
+            "events": [
+                {"type": "comet", "fixture": "left_bar", "t_start": 0,
+                 "step": 0.1, "tail_beats": 1.0, "color": [1, 0, 0]},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "comet.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    r_id = reloaded.plugin.at_id(1)  # pixel 1 R = ch 1; lit at t=0
+    env = next(e for e in clip.findall("Envelopes/Envelopes/ClipEnvelope")
+               if int(e.find("EnvelopeTarget/PointeeId").get("Value")) == r_id)
+    pts = [(float(f.get("Time")), float(f.get("Value")))
+           for f in env.findall("Automation/Events/FloatEvent")
+           if float(f.get("Time")) >= 0]
+    # Pixel 1 lights at t=0 with full red, ramps to 0 at t=1.0
+    assert pts[0] == (0.0, 1.0)
+    assert (1.0, 0.0) in pts
+
+
+def test_sparkle_is_seed_reproducible(tmp_path):
+    def render_and_collect(seed: int):
+        template = load_template(TEMPLATE)
+        spec = Spec.model_validate({
+            "version": 1,
+            "clips": [{
+                "name": "sp",
+                "slot": 0,
+                "length_beats": 4,
+                "events": [
+                    {"type": "sparkle", "fixture": "left_bar",
+                     "t_start": 0, "t_end": 4, "density": 8, "duration": 0.1,
+                     "color": [1, 1, 1], "seed": seed},
+                ],
+            }],
+        })
+        render(spec, template)
+        clip = template.clip_slots[0].find("ClipSlot/Value/MidiClip")
+        return {int(e.find("EnvelopeTarget/PointeeId").get("Value"))
+                for e in clip.findall("Envelopes/Envelopes/ClipEnvelope")}
+
+    a = render_and_collect(seed=42)
+    b = render_and_collect(seed=42)
+    c = render_and_collect(seed=99)
+    assert a == b, "same seed should produce identical channel coverage"
+    assert a != c, "different seeds should (with high probability) differ"
+
+
+def test_ramp_ease_in_is_monotone_accelerating(tmp_path):
+    template = load_template(TEMPLATE)
+    spec = Spec.model_validate({
+        "version": 1,
+        "clips": [{
+            "name": "ra",
+            "slot": 0,
+            "length_beats": 4,
+            "events": [
+                {"type": "ramp", "fixture": "singer_left", "component": "dimmer",
+                 "t_start": 0, "t_end": 4, "v_start": 0.0, "v_end": 1.0,
+                 "curve": "ease_in", "samples": 8},
+            ],
+        }],
+    })
+    render(spec, template)
+    out = tmp_path / "ramp.als"
+    save(template, out)
+    reloaded = load_template(out)
+    assert not validate(reloaded.root)
+    clip = reloaded.clip_slots[0].find("ClipSlot/Value/MidiClip")
+    dim_id = reloaded.plugin.at_id(109)  # singer_left dimmer
+    env = next(e for e in clip.findall("Envelopes/Envelopes/ClipEnvelope")
+               if int(e.find("EnvelopeTarget/PointeeId").get("Value")) == dim_id)
+    pts = sorted(
+        (float(f.get("Time")), float(f.get("Value")))
+        for f in env.findall("Automation/Events/FloatEvent")
+        if float(f.get("Time")) >= 0
+    )
+    vals = [v for _, v in pts]
+    assert vals[0] == 0.0 and vals[-1] == 1.0
+    # ease_in: derivative grows over time → later deltas exceed earlier deltas
+    deltas = [vals[i + 1] - vals[i] for i in range(len(vals) - 1)]
+    assert deltas[-1] > deltas[0], f"ease_in should accelerate; deltas={deltas}"
+
+
 def test_clean_clears_unspecified_slots(tmp_path):
     template = load_template(TEMPLATE)
+    # Pre-populate two slots so we can prove clean wipes the one not in the next spec.
+    setup_spec = Spec.model_validate({
+        "version": 1,
+        "clips": [
+            {"name": "keeper", "slot": 0, "length_beats": 4, "events": [
+                {"type": "color_hold", "fixture": "*", "t_start": 0, "t_end": 4, "color": [0, 1, 0]},
+            ]},
+            {"name": "to be wiped", "slot": 5, "length_beats": 4, "events": [
+                {"type": "color_hold", "fixture": "*", "t_start": 0, "t_end": 4, "color": [0, 0, 1]},
+            ]},
+        ],
+    })
+    render(setup_spec, template)
     pre_populated = sum(
         1 for s in template.clip_slots if s.find("ClipSlot/Value/MidiClip") is not None
     )
-    assert pre_populated > 1, "template needs multiple existing clips for this test"
+    assert pre_populated == 2, f"expected 2 pre-populated slots, got {pre_populated}"
     spec = Spec.model_validate({
         "version": 1,
         "clips": [{

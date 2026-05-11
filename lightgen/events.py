@@ -139,6 +139,24 @@ def color_hold(
     )
 
 
+def color_fade(
+    rgb: tuple[int, int, int],
+    t_start: float,
+    t_end: float,
+    color_start: Color,
+    color_end: Color,
+) -> list[ChannelEvent]:
+    """Linear color crossfade on an (R, G, B) channel triple."""
+    r, g, b = rgb
+    sr, sg, sb = color_start
+    er, eg, eb = color_end
+    return (
+        fade([r], t_start, t_end, sr, er)
+        + fade([g], t_start, t_end, sg, eg)
+        + fade([b], t_start, t_end, sb, eb)
+    )
+
+
 def hsv_to_rgb(h: float, s: float, v: float) -> Color:
     """Convert HSV to RGB. h, s, v all in [0, 1]."""
     h = h % 1.0

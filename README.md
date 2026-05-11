@@ -8,11 +8,11 @@ Phase 0 (this CLI) is the foundation for the full app described in [documentatio
 
 ```bash
 # Inspect a template
-uv run lightgen inspect "documentation/example_sets/claude_lights_start Project/claude_lights_start.als"
+uv run lightgen inspect "template/claude_lights_start Project/claude_lights_start.als"
 
 # Render a spec into a new .als
 uv run lightgen render examples/four_on_floor_red.json \
-  "documentation/example_sets/claude_lights_start Project/claude_lights_start.als" \
+  "template/claude_lights_start Project/claude_lights_start.als" \
   out/four_on_floor_red.als
 ```
 
@@ -28,13 +28,13 @@ uv run lightgen prompt "4-bar red four-on-floor with a white flash on beat 4" my
 
 # Render it
 uv run lightgen render my_spec.json \
-  "documentation/example_sets/claude_lights_start Project/claude_lights_start.als" \
+  "template/claude_lights_start Project/claude_lights_start.als" \
   out/my.als
 
 # Listen, then tweak (overwrites my_spec.json in place)
 uv run lightgen tweak my_spec.json "make beat 3 blue instead of red"
 uv run lightgen render my_spec.json \
-  "documentation/example_sets/claude_lights_start Project/claude_lights_start.als" \
+  "template/claude_lights_start Project/claude_lights_start.als" \
   out/my.als
 ```
 
@@ -87,19 +87,30 @@ A spec is JSON. One file describes one or more clips that get dropped into speci
 
 ### Event types
 
-| Type            | Targets                       | Required fields                                                  |
-| --------------- | ----------------------------- | ---------------------------------------------------------------- |
-| `color_stab`    | RGB triples on strips & spots | `fixture`, `pixel?`, `time`, `duration`, `color: [r,g,b]`        |
-| `color_hold`    | RGB triples on strips & spots | `fixture`, `pixel?`, `t_start`, `t_end`, `color`                 |
-| `gradient_hold` | Strip pixels (HSV interp)     | `fixture`, `t_start`, `t_end`, `hue_start`, `hue_end`            |
-| `value_stab`    | Spot single channel           | `fixture`, `component`, `time`, `duration`, `value`              |
-| `value_hold`    | Spot single channel           | `fixture`, `component`, `t_start`, `t_end`, `value`              |
-| `breathe`       | RGB triple or spot channel    | `fixture`, `t_start`, `t_end`, `v_min`, `v_max`, `cycles`        |
+| Type            | Targets                       | Required fields                                                                              |
+| --------------- | ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `color_stab`    | RGB triples on strips & spots | `fixture`, `pixel?`, `time`, `duration`, `color: [r,g,b]`                                    |
+| `color_hold`    | RGB triples on strips & spots | `fixture`, `pixel?`, `t_start`, `t_end`, `color`                                             |
+| `gradient_hold` | Strip pixels (HSV interp)     | `fixture`, `t_start`, `t_end`, `hue_start`, `hue_end`                                        |
+| `value_stab`    | Spot single channel           | `fixture`, `component`, `time`, `duration`, `value`                                          |
+| `value_hold`    | Spot single channel           | `fixture`, `component`, `t_start`, `t_end`, `value`                                          |
+| `breathe`       | RGB triple or spot channel    | `fixture`, `t_start`, `t_end`, `v_min`, `v_max`, `cycles`                                    |
+| `fade`          | RGB triple or spot channel    | `fixture`, `component?`, `pixel?`, `t_start`, `t_end`, `color_start`/`color_end` or `value_start`/`value_end` |
+| `ramp`          | Spot single channel           | `fixture`, `component`, `t_start`, `t_end`, `v_start`, `v_end`, `curve?` (`linear`/`ease_in`/`ease_out`) |
+| `pulse_pattern` | RGB triple or spot channel    | `fixture`, `pixel?`, `component?`, `t_start`, `t_end`, `period`, `pulses`, `color?`/`value?` |
+| `strobe`        | RGB triple or spot channel    | `fixture`, `pixel?`, `component?`, `t_start`, `t_end`, `rate_per_beat`, `duty?`, `color?`/`value?` |
+| `chase`         | Strip pixels (pixel-by-pixel) | `fixture`, `t_start`, `step`, `duration`, `color`, `reverse?`, `period?`, `t_end?`           |
+| `comet`         | Strip pixels with fading tail | `fixture`, `t_start`, `step`, `tail_beats`, `color`, `reverse?`, `period?`, `t_end?`         |
+| `sparkle`       | Random pixels on a strip      | `fixture`, `t_start`, `t_end`, `density`, `duration`, `color`, `seed?`                       |
 
-- `fixture` accepts `"*"` for "all fixtures" (filtered by event type's compatibility).
+- `fixture` accepts `"*"` for "all fixtures" (filtered by event type's compatibility), a group name (`bars`, `spots`), or a single fixture name.
 - `pixel` (strips) accepts an integer 1..N or `"*"` for all pixels. Default: `"*"`.
-- `component` (spots) is one of `dimmer`, `red`, `green`, `blue`, `white`, `strobe`.
+- `component` (spots) is one of `dimmer`, `red`, `green`, `blue`, `white`, `strobe`. For `breathe`/`fade`/`pulse_pattern`/`strobe`, also accepts `"rgb"` to address the color triple.
 - `color_index` is Live's clip-color palette: 0..69. 1=red, 4=blue, 9=purple, etc.
+- `pulse_pattern.pulses` is a list of `{offset, duration}` objects describing one cycle; the cycle repeats every `period` beats.
+- `chase.period`/`t_end` (and `comet.period`/`t_end`) are paired: set both to repeat the sweep, omit both for a single pass.
+- `strobe.rate_per_beat` sets the strobe rate (e.g. `16` = sixteen flashes per beat); `duty` is the on-fraction (default `0.5`).
+- `sparkle.density` is approximate stabs per beat; `seed` makes output reproducible.
 
 ### Examples
 
@@ -128,7 +139,7 @@ The pipeline is intentionally three-stage: invalid input is caught at parse, inv
 
 ## Limits in this phase
 
-- Only the `hitmix` rig is supported. Custom rigs come in a later phase.
-- No high-level patterns yet (chase, comet, sweep, strobe). Build them by stacking the primitives or describe them to `lightgen prompt`.
+- Only the `hitmix` rig ships built-in. Adding a rig is a one-line entry in `lightgen.fixtures.RIGS`; UI for custom rigs comes in a later phase.
+- High-level patterns shipped: `chase`, `comet`, `pulse_pattern`, `strobe`, `sparkle`, `fade`, `ramp`. More (e.g. sweep, wash crossfade) can be expressed by stacking primitives or described to `lightgen prompt`.
 - No DMX preview, no UI yet. See the [build plan](documentation/lighting-app-plan.md) for the roadmap.
 - The renderer uses the *first* MidiClip it finds in the template's DMXIS track as the clone source. If your template has no clips, add one in Live first.

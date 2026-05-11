@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "rig": "hitmix",
+  "clips": [
+    {
+      "name": "fade red to blue",
+      "slot": 0,
+      "length_beats": 8,
+      "color_index": 14,
+      "events": [
+        {"type": "fade", "fixture": "bars", "t_start": 0, "t_end": 8,
+         "color_start": [1, 0, 0], "color_end": [0, 0.4, 1]},
+        {"type": "fade", "fixture": "spots", "component": "rgb", "t_start": 0, "t_end": 8,
+         "color_start": [1, 0, 0], "color_end": [0, 0.4, 1]},
+        {"type": "value_hold", "fixture": "spots", "component": "dimmer",
+         "t_start": 0, "t_end": 8, "value": 1.0}
+      ]
+    },
+    {
+      "name": "ease-in build",
+      "slot": 1,
+      "length_beats": 8,
+      "color_index": 4,
+      "events": [
+        {"type": "color_hold", "fixture": "*", "t_start": 0, "t_end": 8,
+         "color": [1, 0.8, 0.2]},
+        {"type": "ramp", "fixture": "spots", "component": "dimmer",
+         "t_start": 0, "t_end": 8, "v_start": 0.0, "v_end": 1.0, "curve": "ease_in"}
+      ]
+    },
+    {
+      "name": "16th strobe",
+      "slot": 2,
+      "length_beats": 4,
+      "color_index": 0,
+      "events": [
+        {"type": "strobe", "fixture": "bars", "t_start": 0, "t_end": 4,
+         "rate_per_beat": 16, "duty": 0.3, "color": [1, 1, 1]}
+      ]
+    },
+    {
+      "name": "comet sweep",
+      "slot": 3,
+      "length_beats": 8,
+      "color_index": 9,
+      "events": [
+        {"type": "comet", "fixture": "left_bar", "t_start": 0, "step": 0.1,
+         "tail_beats": 1.0, "color": [0, 0.4, 1], "period": 4, "t_end": 8},
+        {"type": "comet", "fixture": "right_bar", "t_start": 0, "step": 0.1,
+         "tail_beats": 1.0, "color": [0, 0.4, 1], "reverse": true,
+         "period": 4, "t_end": 8}
+      ]
+    },
+    {
+      "name": "sparkle texture",
+      "slot": 4,
+      "length_beats": 8,
+      "color_index": 2,
+      "events": [
+        {"type": "sparkle", "fixture": "left_bar", "t_start": 0, "t_end": 8,
+         "density": 12, "duration": 0.15, "color": [1, 0.8, 0.5], "seed": 7},
+        {"type": "sparkle", "fixture": "right_bar", "t_start": 0, "t_end": 8,
+         "density": 12, "duration": 0.15, "color": [1, 0.8, 0.5], "seed": 13}
+      ]
+    }
+  ]
+}
