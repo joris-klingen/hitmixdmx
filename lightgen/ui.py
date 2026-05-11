@@ -75,8 +75,8 @@ def _tweak(tweak_prompt: str, model_choice: str, current_spec_json: str):
     )
 
 
-def _render_and_open(current_spec_json: str, template_path: str):
-    """Render the on-screen spec to .als and open it in Live."""
+def _render(current_spec_json: str, template_path: str):
+    """Render the on-screen spec to .als."""
     if not current_spec_json.strip():
         return "No spec to render."
     try:
@@ -93,14 +93,21 @@ def _render_and_open(current_spec_json: str, template_path: str):
         save(template, ALS_PATH)
     except (ValueError, RuntimeError) as e:
         return f"❌ Render error: {e}"
+    return f"✅ Rendered to {ALS_PATH.relative_to(REPO_ROOT)}"
+
+
+def _open_in_live():
+    """Open the last rendered .als in Live."""
+    if not ALS_PATH.exists():
+        return f"❌ Nothing to open — {ALS_PATH.relative_to(REPO_ROOT)} doesn't exist yet. Render first."
     try:
         subprocess.run(["open", str(ALS_PATH)], check=False)
     except FileNotFoundError:
         return (
-            f"✅ Rendered to {ALS_PATH.relative_to(REPO_ROOT)} "
-            "(could not auto-open; `open` not on PATH — open the file in Live manually)"
+            f"❌ `open` not on PATH — open {ALS_PATH.relative_to(REPO_ROOT)} "
+            "in Live manually."
         )
-    return f"✅ Rendered to {ALS_PATH.relative_to(REPO_ROOT)} and opened in Live."
+    return f"✅ Opened {ALS_PATH.relative_to(REPO_ROOT)} in Live."
 
 
 def build_app():
@@ -157,7 +164,9 @@ def build_app():
                     value=str(DEFAULT_TEMPLATE.relative_to(REPO_ROOT)),
                     lines=1,
                 )
-                render_btn = gr.Button("Render & Open in Live", variant="primary")
+                with gr.Row():
+                    render_btn = gr.Button("Render", variant="primary")
+                    open_btn = gr.Button("Open in Live")
 
                 status_out = gr.Textbox(
                     label="Status",
@@ -183,8 +192,13 @@ def build_app():
             outputs=[spec_view, status_out],
         )
         render_btn.click(
-            _render_and_open,
+            _render,
             inputs=[spec_view, template_in],
+            outputs=[status_out],
+        )
+        open_btn.click(
+            _open_in_live,
+            inputs=[],
             outputs=[status_out],
         )
 
