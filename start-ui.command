@@ -5,4 +5,4 @@ set -e
 cd "$(dirname "$0")"
 # Finder-launched scripts don't load ~/.zshrc, so add common uv install paths:
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-exec uv run lightgen ui
+exec uv run --extra ui lightgen ui
