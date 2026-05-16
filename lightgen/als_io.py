@@ -58,9 +58,27 @@ class TemplateInfo:
         self.root.find("LiveSet/NextPointeeId").set("Value", str(self.next_pointee_id))
 
 
-def _find_dmxis_track(root: ET.Element) -> tuple[ET.Element, ET.Element]:
-    """Return (MidiTrack, PluginDevice) for the track containing DMXIS."""
-    for track in root.find("LiveSet/Tracks"):
+def _find_dmxis_track(
+    root: ET.Element, track_index: int | None = None
+) -> tuple[ET.Element, ET.Element]:
+    """Return (MidiTrack, PluginDevice).
+
+    If `track_index` is given, target that specific track in LiveSet/Tracks
+    (used when a file has multiple plugin-bearing tracks and you need to pick).
+    Otherwise return the first MidiTrack that has any PluginDevice.
+    """
+    tracks = list(root.find("LiveSet/Tracks"))
+    if track_index is not None:
+        track = tracks[track_index]
+        if track.tag != "MidiTrack":
+            raise RuntimeError(
+                f"track {track_index} is {track.tag}, not a MidiTrack"
+            )
+        plugin = track.find(".//PluginDevice")
+        if plugin is None:
+            raise RuntimeError(f"track {track_index} has no PluginDevice")
+        return track, plugin
+    for track in tracks:
         if track.tag != "MidiTrack":
             continue
         plugin = track.find(".//PluginDevice")
@@ -106,12 +124,12 @@ def _find_clone_source(track: ET.Element) -> ET.Element:
     return clips[0]
 
 
-def load_template(path: str | Path) -> TemplateInfo:
+def load_template(path: str | Path, *, track_index: int | None = None) -> TemplateInfo:
     p = Path(path)
     with gzip.open(p, "rb") as f:
         xml_bytes = f.read()
     root = ET.fromstring(xml_bytes)
-    track, plugin = _find_dmxis_track(root)
+    track, plugin = _find_dmxis_track(root, track_index=track_index)
     info = _introspect_plugin(plugin)
     slots = track.findall(".//ClipSlotList/ClipSlot")
     scenes = root.findall("LiveSet/Scenes/Scene")
@@ -128,14 +146,36 @@ def load_template(path: str | Path) -> TemplateInfo:
     )
 
 
-def save(template: TemplateInfo, path: str | Path) -> None:
+def save(
+    template: TemplateInfo,
+    path: str | Path,
+    *,
+    tolerate: tuple[str, ...] = (),
+    validate_track_indices: set[int] | None = None,
+) -> None:
+    """Validate and write the template to `path`.
+
+    `tolerate` is a list of substrings; any issue whose message contains one of
+    them is logged but doesn't block the save. Use for issues that pre-exist in
+    a third-party `.als` and that Live demonstrably tolerates (e.g. slot/scene
+    Id mismatches when rendering into someone else's working set).
+
+    `validate_track_indices` limits validation to specific track indices. Use
+    when rendering into a multi-track destination so we don't flag pre-existing
+    state on tracks we didn't touch.
+    """
     template.commit_next_pointee_id()
-    issues = validate(template.root)
-    if issues:
+    issues = validate(template.root, track_indices=validate_track_indices)
+    fatal = [i for i in issues if not any(t in i for t in tolerate)]
+    tolerated = [i for i in issues if i not in fatal]
+    if fatal:
         raise ValueError(
             "template failed validation, refusing to save:\n  - "
-            + "\n  - ".join(issues)
+            + "\n  - ".join(fatal)
         )
+    if tolerated:
+        print(f"warning: tolerating {len(tolerated)} pre-existing issue(s) "
+              f"matching {list(tolerate)}")
     xml_bytes = ET.tostring(
         template.root, encoding="utf-8", xml_declaration=True, short_empty_elements=True
     )
@@ -145,12 +185,23 @@ def save(template: TemplateInfo, path: str | Path) -> None:
         f.write(xml_bytes)
 
 
-def validate(root: ET.Element) -> list[str]:
-    """Run hard invariants from build-lighting-clips.md. Returns list of issues."""
+def validate(
+    root: ET.Element, *, track_indices: set[int] | None = None
+) -> list[str]:
+    """Run hard invariants from build-lighting-clips.md. Returns list of issues.
+
+    If `track_indices` is given, only check those tracks (by index into
+    LiveSet/Tracks). Use this when rendering into a multi-track destination
+    where other tracks have their own pre-existing envelope conventions
+    (e.g. rack-macro routing or 0..127 value ranges) that this validator
+    doesn't model.
+    """
     ls = root.find("LiveSet")
     issues: list[str] = []
     scenes = list(ls.find("Scenes"))
-    for track in ls.find("Tracks"):
+    for ti, track in enumerate(ls.find("Tracks")):
+        if track_indices is not None and ti not in track_indices:
+            continue
         if track.tag not in ("AudioTrack", "MidiTrack"):
             continue
         slots = track.findall(".//ClipSlotList/ClipSlot")

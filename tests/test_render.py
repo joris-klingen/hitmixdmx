@@ -25,7 +25,7 @@ def test_template_round_trips(tmp_path):
     assert template.plugin.channel_count == 120
     assert template.plugin.base_at_id == 23980
     assert template.plugin.stride == 2
-    assert template.scene_count == 50
+    assert template.scene_count == 2000
     out = tmp_path / "round.als"
     save(template, out)
     reloaded = load_template(out)

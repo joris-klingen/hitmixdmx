@@ -57,10 +57,41 @@ def _expand_clip(clip: Clip, rig) -> list[ChannelEvent]:
     return out
 
 
+SIMPLIFY_TOLERANCE = 0.01
+"""Per-event simplification tolerance in [0,1] space (~2.5 DMX values out of 255).
+Drop a middle point if it deviates from the linear interpolation of its
+neighbours by less than this. Invisible for lighting, slashes file size."""
+
+
+def _simplify_collinear(
+    events: list[tuple[float, float]], tolerance: float = SIMPLIFY_TOLERANCE
+) -> list[tuple[float, float]]:
+    """Drop middle events that lie on (or very near) the line between their
+    surviving neighbours. Single forward pass. Preserves instant-jump idiom
+    (events sharing a time stamp with a neighbour are never dropped)."""
+    if len(events) < 3:
+        return events
+    kept: list[tuple[float, float]] = [events[0]]
+    for i in range(1, len(events) - 1):
+        t_prev, v_prev = kept[-1]
+        t_curr, v_curr = events[i]
+        t_next, v_next = events[i + 1]
+        if t_curr == t_prev or t_curr == t_next:
+            kept.append(events[i])
+            continue
+        frac = (t_curr - t_prev) / (t_next - t_prev)
+        v_interp = v_prev + frac * (v_next - v_prev)
+        if abs(v_curr - v_interp) > tolerance:
+            kept.append(events[i])
+    kept.append(events[-1])
+    return kept
+
+
 def _group_normalize(
     events: list[ChannelEvent], clip_len: float
 ) -> dict[int, list[tuple[float, float]]]:
-    """Group events by channel, then per-channel: sort, clamp, dedupe, terminate."""
+    """Group events by channel, then per-channel: sort, clamp, dedupe, terminate,
+    simplify collinear runs."""
     by_ch: dict[int, list[tuple[float, float]]] = {}
     for ch, t, v in events:
         by_ch.setdefault(ch, []).append((t, v))
@@ -79,7 +110,7 @@ def _group_normalize(
             last_t, last_v = evs_dedup[-1]
             if last_t < clip_len:
                 evs_dedup.append((clip_len, last_v))
-        by_ch[ch] = evs_dedup
+        by_ch[ch] = _simplify_collinear(evs_dedup)
     return by_ch
 
 
