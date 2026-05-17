@@ -103,6 +103,18 @@ def main(argv: list[str] | None = None) -> int:
         help="also write the intermediate JSON spec to this path",
     )
 
+    p_midi = sub.add_parser(
+        "midi-render",
+        help="translate MIDI clips on DMX_notes into DMX automation on DMX_plugin",
+    )
+    p_midi.add_argument("input", type=Path, help=".als file with DMX_notes + DMX_plugin tracks")
+    p_midi.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="output path (default: overwrite input)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.cmd == "render":
@@ -126,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
             args.target_track,
             args.strip_source_track,
         )
+    if args.cmd == "midi-render":
+        return _cmd_midi_render(args.input, args.out)
     parser.error(f"unknown command {args.cmd}")
     return 2
 
@@ -254,6 +268,16 @@ def _cmd_convert_legacy(
         save_kwargs["validate_track_indices"] = {validate_idx}
     save(template, out_path, **save_kwargs)
     print(f"Wrote {out_path}")
+    return 0
+
+
+def _cmd_midi_render(input_path: Path, out_path: Path | None) -> int:
+    from .midi_to_dmx import render_midi_to_dmx
+
+    target = out_path or input_path
+    print(f"Rendering MIDI clips from {input_path} → {target}")
+    render_midi_to_dmx(input_path, target)
+    print(f"Wrote {target}")
     return 0
 
 
